@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 mod events;
 mod models;
 mod store;
@@ -9,7 +11,6 @@ mod concurrency;
 mod benchmarks;
 mod formal_verification;
 
-use chrono::Utc;
 use models::*;
 use store::{EventStore, GraphStore, StateStore};
 use graph_algorithms::*;

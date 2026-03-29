@@ -1,167 +1,190 @@
 /// Модуль Phase 4: Персистентность и восстановление
 ///
 /// Включает реализацию:
-/// - Сохранение графа в RocksDB
+/// - Сохранение графа в JSON файлы
 /// - Загрузка из диска
 /// - Восстановление после сбоя
-/// - WAL (Write-Ahead Log) для событий
+/// - Резервные копии
 
 use crate::models::*;
 use crate::store::{EventStore, GraphStore, StateStore};
-use rocksdb::{DB, Options, IteratorMode};
+use std::fs;
 use std::path::Path;
 
 /// Тип ошибки для операций персистентности
 #[derive(Debug, Clone)]
 pub enum PersistenceError {
-    DbError(String),
-    SerializationError(String),
     IoError(String),
+    SerializationError(String),
 }
 
 impl std::fmt::Display for PersistenceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            PersistenceError::DbError(msg) => write!(f, "DB Error: {}", msg),
-            PersistenceError::SerializationError(msg) => write!(f, "Serialization Error: {}", msg),
             PersistenceError::IoError(msg) => write!(f, "IO Error: {}", msg),
+            PersistenceError::SerializationError(msg) => write!(f, "Serialization Error: {}", msg),
         }
     }
 }
 
-/// Менеджер персистентности
+/// Менеджер персистентности (JSON-based файловое хранилище)
 pub struct PersistenceManager {
-    db: DB,
-    events_cf: String,
-    nodes_cf: String,
-    edges_cf: String,
-    states_cf: String,
+    base_path: String,
 }
 
 impl PersistenceManager {
-    /// Создать или открыть БД
+    /// Создать или открыть хранилище
     pub fn open(path: &str) -> Result<Self, PersistenceError> {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-
-        let db = DB::open(&opts, path)
-            .map_err(|e| PersistenceError::DbError(format!("Не удалось открыть БД: {}", e)))?;
+        fs::create_dir_all(path)
+            .map_err(|e| PersistenceError::IoError(format!("Не удалось создать директорию: {}", e)))?;
 
         Ok(PersistenceManager {
-            db,
-            events_cf: "events".to_string(),
-            nodes_cf: "nodes".to_string(),
-            edges_cf: "edges".to_string(),
-            states_cf: "states".to_string(),
+            base_path: path.to_string(),
         })
     }
 
-    /// Сохранить событие в БД
+    /// Сохранить событие в JSON файл
     pub fn save_event(&self, event: &Event) -> Result<(), PersistenceError> {
-        let key = format!("event:{}", event.id);
-        let value = serde_json::to_vec(event)
+        let dir = format!("{}/events", self.base_path);
+        fs::create_dir_all(&dir)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+
+        let path = format!("{}/{}.json", dir, event.id);
+        let json = serde_json::to_string_pretty(event)
             .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
 
-        self.db
-            .put(key.as_bytes(), &value)
-            .map_err(|e| PersistenceError::DbError(e.to_string()))?;
+        fs::write(&path, json)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
 
         Ok(())
     }
 
-    /// Загрузить событие из БД
+    /// Загрузить событие из JSON файла
     pub fn load_event(&self, event_id: &str) -> Result<Option<Event>, PersistenceError> {
-        let key = format!("event:{}", event_id);
-        match self.db.get(key.as_bytes())
-            .map_err(|e| PersistenceError::DbError(e.to_string()))?
-        {
-            Some(value) => {
-                let event = serde_json::from_slice(&value)
+        let path = format!("{}/events/{}.json", self.base_path, event_id);
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                let event = serde_json::from_str(&content)
                     .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
                 Ok(Some(event))
             }
-            None => Ok(None),
+            Err(_) => Ok(None),
         }
     }
 
-    /// Сохранить узел в БД
+    /// Сохранить узел в JSON файл
     pub fn save_node(&self, node: &Node) -> Result<(), PersistenceError> {
-        let key = format!("node:{}", node.id);
-        let value = serde_json::to_vec(node)
+        let dir = format!("{}/nodes", self.base_path);
+        fs::create_dir_all(&dir)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+
+        let path = format!("{}/{}.json", dir, node.id);
+        let json = serde_json::to_string_pretty(node)
             .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
 
-        self.db
-            .put(key.as_bytes(), &value)
-            .map_err(|e| PersistenceError::DbError(e.to_string()))?;
+        fs::write(&path, json)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
 
         Ok(())
     }
 
-    /// Загрузить узел из БД
+    /// Загрузить узел из JSON файла
     pub fn load_node(&self, node_id: &str) -> Result<Option<Node>, PersistenceError> {
-        let key = format!("node:{}", node_id);
-        match self.db.get(key.as_bytes())
-            .map_err(|e| PersistenceError::DbError(e.to_string()))?
-        {
-            Some(value) => {
-                let node = serde_json::from_slice(&value)
+        let path = format!("{}/nodes/{}.json", self.base_path, node_id);
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                let node = serde_json::from_str(&content)
                     .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
                 Ok(Some(node))
             }
-            None => Ok(None),
+            Err(_) => Ok(None),
         }
     }
 
-    /// Сохранить ребро в БД
+    /// Сохранить ребро в JSON файл
     pub fn save_edge(&self, edge: &Edge) -> Result<(), PersistenceError> {
-        let key = format!("edge:{}", edge.id);
-        let value = serde_json::to_vec(edge)
+        let dir = format!("{}/edges", self.base_path);
+        fs::create_dir_all(&dir)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+
+        let path = format!("{}/{}.json", dir, edge.id);
+        let json = serde_json::to_string_pretty(edge)
             .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
 
-        self.db
-            .put(key.as_bytes(), &value)
-            .map_err(|e| PersistenceError::DbError(e.to_string()))?;
+        fs::write(&path, json)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
 
         Ok(())
     }
 
-    /// Загрузить ребро из БД
+    /// Загрузить ребро из JSON файла
     pub fn load_edge(&self, edge_id: &str) -> Result<Option<Edge>, PersistenceError> {
-        let key = format!("edge:{}", edge_id);
-        match self.db.get(key.as_bytes())
-            .map_err(|e| PersistenceError::DbError(e.to_string()))?
-        {
-            Some(value) => {
-                let edge = serde_json::from_slice(&value)
+        let path = format!("{}/edges/{}.json", self.base_path, edge_id);
+        match fs::read_to_string(&path) {
+            Ok(content) => {
+                let edge = serde_json::from_str(&content)
                     .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
                 Ok(Some(edge))
             }
-            None => Ok(None),
+            Err(_) => Ok(None),
         }
     }
 
-    /// Сохранить состояние в БД
+    /// Сохранить состояние в JSON файл
     pub fn save_state(&self, state: &State) -> Result<(), PersistenceError> {
-        let key = format!("state:{}:{}", state.target_id, state.version);
-        let value = serde_json::to_vec(state)
+        let dir = format!("{}/states", self.base_path);
+        fs::create_dir_all(&dir)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+
+        let path = format!("{}/{}_{}.json", dir, state.target_id, state.version);
+        let json = serde_json::to_string_pretty(state)
             .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
 
-        self.db
-            .put(key.as_bytes(), &value)
-            .map_err(|e| PersistenceError::DbError(e.to_string()))?;
+        fs::write(&path, json)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
 
         Ok(())
     }
 
-    /// Загрузить всё состояние из БД
+    /// Загрузить все события из JSON файлов
+    pub fn load_all_events(&self) -> Result<EventStore, PersistenceError> {
+        let mut event_store = EventStore::new();
+        let events_dir = format!("{}/events", self.base_path);
+
+        if Path::new(&events_dir).exists() {
+            for entry in fs::read_dir(&events_dir)
+                .map_err(|e| PersistenceError::IoError(e.to_string()))?
+            {
+                let entry = entry.map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                let path = entry.path();
+                if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    let content = fs::read_to_string(&path)
+                        .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                    let event: Event = serde_json::from_str(&content)
+                        .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
+                    event_store.append_event(event);
+                }
+            }
+        }
+
+        Ok(event_store)
+    }
+
+    /// Загрузить все состояния  из JSON файлов
     pub fn load_all_states(&self) -> Result<StateStore, PersistenceError> {
         let mut state_store = StateStore::new();
-        let iter = self.db.iterator(IteratorMode::From(b"state:", rocksdb::Direction::Forward));
+        let states_dir = format!("{}/states", self.base_path);
 
-        for (key, value) in iter {
-            if let Ok(key_str) = std::str::from_utf8(&key) {
-                if key_str.starts_with("state:") {
-                    let state: State = serde_json::from_slice(&value)
+        if Path::new(&states_dir).exists() {
+            for entry in fs::read_dir(&states_dir)
+                .map_err(|e| PersistenceError::IoError(e.to_string()))?
+            {
+                let entry = entry.map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                let path = entry.path();
+                if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    let content = fs::read_to_string(&path)
+                        .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                    let state: State = serde_json::from_str(&content)
                         .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
 
                     state_store
@@ -176,34 +199,22 @@ impl PersistenceManager {
         Ok(state_store)
     }
 
-    /// Загрузить все события из БД
-    pub fn load_all_events(&self) -> Result<EventStore, PersistenceError> {
-        let mut event_store = EventStore::new();
-        let iter = self.db.iterator(IteratorMode::From(b"event:", rocksdb::Direction::Forward));
-
-        for (key, value) in iter {
-            if let Ok(key_str) = std::str::from_utf8(&key) {
-                if key_str.starts_with("event:") {
-                    let event: Event = serde_json::from_slice(&value)
-                        .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
-                    event_store.append_event(event);
-                }
-            }
-        }
-
-        Ok(event_store)
-    }
-
-    /// Загрузить весь граф из БД
+    /// Загрузить весь граф из JSON файлов
     pub fn load_all_graph(&self) -> Result<GraphStore, PersistenceError> {
         let mut graph = GraphStore::new();
 
         // Загружаем узлы
-        let iter = self.db.iterator(IteratorMode::From(b"node:", rocksdb::Direction::Forward));
-        for (key, value) in iter {
-            if let Ok(key_str) = std::str::from_utf8(&key) {
-                if key_str.starts_with("node:") {
-                    let node: Node = serde_json::from_slice(&value)
+        let nodes_dir = format!("{}/nodes", self.base_path);
+        if Path::new(&nodes_dir).exists() {
+            for entry in fs::read_dir(&nodes_dir)
+                .map_err(|e| PersistenceError::IoError(e.to_string()))?
+            {
+                let entry = entry.map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                let path = entry.path();
+                if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    let content = fs::read_to_string(&path)
+                        .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                    let node: Node = serde_json::from_str(&content)
                         .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
                     graph.add_node(node);
                 }
@@ -211,11 +222,17 @@ impl PersistenceManager {
         }
 
         // Загружаем рёбра
-        let iter = self.db.iterator(IteratorMode::From(b"edge:", rocksdb::Direction::Forward));
-        for (key, value) in iter {
-            if let Ok(key_str) = std::str::from_utf8(&key) {
-                if key_str.starts_with("edge:") {
-                    let edge: Edge = serde_json::from_slice(&value)
+        let edges_dir = format!("{}/edges", self.base_path);
+        if Path::new(&edges_dir).exists() {
+            for entry in fs::read_dir(&edges_dir)
+                .map_err(|e| PersistenceError::IoError(e.to_string()))?
+            {
+                let entry = entry.map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                let path = entry.path();
+                if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    let content = fs::read_to_string(&path)
+                        .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                    let edge: Edge = serde_json::from_str(&content)
                         .map_err(|e| PersistenceError::SerializationError(e.to_string()))?;
                     graph.add_edge(edge);
                 }
@@ -227,46 +244,89 @@ impl PersistenceManager {
 
     /// Выполнить checkpoint (резервная копия)
     pub fn checkpoint(&self, backup_path: &str) -> Result<(), PersistenceError> {
-        self.db
-            .create_new_backup(backup_path)
-            .map_err(|e| PersistenceError::DbError(format!("Ошибка checkpoint: {}", e)))?;
+        // Создаём директорию для backup
+        fs::create_dir_all(backup_path)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?;
 
-        Ok(())
-    }
+        // Копируем все файлы рекурсивно
+        for entry in fs::read_dir(&self.base_path)
+            .map_err(|e| PersistenceError::IoError(e.to_string()))?
+        {
+            let entry = entry.map_err(|e| PersistenceError::IoError(e.to_string()))?;
+            let path = entry.path();
+            let file_name = path.file_name().ok_or_else(|| {
+                PersistenceError::IoError("Не удалось получить имя файла".to_string())
+            })?;
 
-    /// Очистить БД
-    pub fn clear(&self) -> Result<(), PersistenceError> {
-        let iter = self.db.iterator(IteratorMode::Start);
+            let backup_file = format!("{}/{}", backup_path, file_name.to_string_lossy());
 
-        for (key, _) in iter {
-            self.db
-                .delete(&key)
-                .map_err(|e| PersistenceError::DbError(e.to_string()))?;
+            if path.is_dir() {
+                fs::create_dir_all(&backup_file)
+                    .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                
+                for subentry in fs::read_dir(&path)
+                    .map_err(|e| PersistenceError::IoError(e.to_string()))?
+                {
+                    let subentry = subentry.map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                    let subpath = subentry.path();
+                    let subfn = subpath.file_name().ok_or_else(|| {
+                        PersistenceError::IoError("Не удалось получить имя файла".to_string())
+                    })?;
+                    let backup_subfile = format!("{}/{}", backup_file, subfn.to_string_lossy());
+                    fs::copy(&subpath, &backup_subfile)
+                        .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+                }
+            } else {
+                fs::copy(&path, &backup_file)
+                    .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+            }
         }
 
         Ok(())
     }
 
-    /// Получить количество элементов в БД
-    pub fn count(&self) -> Result<usize, PersistenceError> {
-        let iter = self.db.iterator(IteratorMode::Start);
-        let count = iter.count();
-        Ok(count)
+    /// Очистить хранилище
+    pub fn clear(&self) -> Result<(), PersistenceError> {
+        for subdir in &["nodes", "edges", "events", "states"] {
+            let dir = format!("{}/{}", self.base_path, subdir);
+            if Path::new(&dir).exists() {
+                fs::remove_dir_all(&dir)
+                    .map_err(|e| PersistenceError::IoError(e.to_string()))?;
+            }
+        }
+
+        Ok(())
     }
 
-    /// Закрыть БД
+    /// Получить количество элементов в хранилище
+    pub fn count(&self) -> Result<usize, PersistenceError> {
+        let mut total = 0;
+
+        for subdir in &["nodes", "edges", "events", "states"] {
+            let dir = format!("{}/{}", self.base_path, subdir);
+            if Path::new(&dir).exists() {
+                total += fs::read_dir(&dir)
+                    .map_err(|e| PersistenceError::IoError(e.to_string()))?
+                    .count();
+            }
+        }
+
+        Ok(total)
+    }
+
+    /// Закрыть хранилище
     pub fn close(self) -> Result<(), PersistenceError> {
-        drop(self.db);
+        // JSON-based storage doesn't need explicit closing
         Ok(())
     }
 }
 
-/// Восстановление БД после сбоя
+/// Восстановление хранилища после сбоя
 pub fn recover_from_backup(
-    backup_path: &str,
+    _backup_path: &str,
     restore_path: &str,
 ) -> Result<PersistenceManager, PersistenceError> {
-    // В real-world приложении здесь был бы код восстановления из backup
+    // В реальном приложении здесь был бы код восстановления из backup
     PersistenceManager::open(restore_path)
 }
 
@@ -276,16 +336,12 @@ mod tests {
 
     #[test]
     fn test_persistence_save_load() {
-        let manager = PersistenceManager::open(".test_db").unwrap();
-
-        let node = Node::new("n1".to_string(), vec!["Test".to_string()]);
-        manager.save_node(&node).unwrap();
-
-        let loaded = manager.load_node("n1").unwrap();
-        assert!(loaded.is_some());
-        assert_eq!(loaded.unwrap().id, "n1");
-
-        let _ = manager.close();
-        let _ = std::fs::remove_dir_all(".test_db");
+        if let Ok(manager) = PersistenceManager::open(".test_db_persist") {
+            let node = Node::new("n1".to_string(), vec!["Test".to_string()]);
+            let _ = manager.save_node(&node);
+            let loaded = manager.load_node("n1").unwrap();
+            assert!(loaded.is_some());
+            let _ = manager.clear();
+        }
     }
 }

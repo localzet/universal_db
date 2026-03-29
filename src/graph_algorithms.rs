@@ -7,7 +7,6 @@
 /// - Временные запросы (путь с фильтром по времени)
 /// - Анализ достижимости
 
-use crate::models::*;
 use crate::store::{GraphStore, StateStore};
 use chrono::{DateTime, Utc};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -298,6 +297,7 @@ pub fn calculate_node_degrees(graph: &GraphStore) -> HashMap<String, (usize, usi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{Node, Edge};
 
     #[test]
     fn test_bfs_basic() {

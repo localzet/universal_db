@@ -304,7 +304,7 @@ mod tests {
     fn test_conflict_detection() {
         let mut manager = TransactionManager::new();
 
-        let tx = manager.create_transaction(
+        let _tx = manager.create_transaction(
             "tx1".to_string(),
             ConflictResolutionStrategy::LastWriteWins,
         );

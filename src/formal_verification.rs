@@ -8,7 +8,7 @@
 
 use crate::models::*;
 use crate::store::{GraphStore, StateStore};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 /// Инварианты для проверки консистентности
 pub struct ConsistencyInvariant {
@@ -356,6 +356,3 @@ mod tests {
         assert_eq!(tracer.get_trace_log().len(), 2);
     }
 }
-
-use chrono;
-use crate::store::StateStore;

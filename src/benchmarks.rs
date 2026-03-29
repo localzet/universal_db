@@ -320,5 +320,3 @@ pub fn print_comparison_table() {
     println!("║ Память (1000obj)  ║ 4MB           ║ 8MB       ║ 6MB       ║");
     println!("╚══════════════════╩═══════════════╩═══════════╩═══════════╝");
 }
-
-use crate::store::*;

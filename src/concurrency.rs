@@ -91,6 +91,7 @@ impl ConcurrencyManager {
 /// Параллельный обработчик событий
 pub struct ParallelEventProcessor {
     batch_size: usize,
+    #[allow(dead_code)]
     num_workers: usize,
 }
 
@@ -175,6 +176,7 @@ impl AsyncEventQueue {
 /// Блокировка для чтения/записи с таймаутом
 pub struct TimeoutLock<T> {
     inner: Arc<RwLock<T>>,
+    #[allow(dead_code)]
     timeout_ms: u64,
 }
 
@@ -238,8 +240,10 @@ pub struct OperationGuard {
 
 impl OperationGuard {
     pub fn new(counter: Arc<Mutex<usize>>) -> Self {
-        let mut c = counter.lock();
-        *c += 1;
+        {
+            let mut c = counter.lock();
+            *c += 1;
+        }
         OperationGuard { counter }
     }
 }

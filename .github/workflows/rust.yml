@@ -1,0 +1,24 @@
+name: Rust CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Show Rust toolchain
+        run: rustc --version && cargo --version
+      - name: Validate dependency lockfile
+        run: cargo metadata --locked --no-deps --format-version 1 > /dev/null
+      - name: Check library and demo compilation
+        run: cargo check --locked --all-targets
+      - name: Execute existing tests
+        run: cargo test --locked

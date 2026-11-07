@@ -123,12 +123,12 @@ fn main() {
     println!("   ✓ Property index entries: {}", stats.property_index_entries);
 
     // === PHASE 4: Персистентность ===
-    println!("\n📍 PHASE 4: Персистентность (RocksDB)");
+    println!("\n📍 PHASE 4: Персистентность (JSON-файлы)");
     
     match persistence::PersistenceManager::open(".test_db_phase4") {
         Ok(pm) => {
             let _ = pm.save_node(&node_alice);
-            println!("   ✓ Узел сохранён в RocksDB");
+            println!("   ✓ Узел сохранён в JSON-хранилище");
             let _ = pm.close();
             let _ = std::fs::remove_dir_all(".test_db_phase4");
         }
